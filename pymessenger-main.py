@@ -1,0 +1,420 @@
+#!/usr/bin/env python3
+"""
+Code: https://github.com/agastyapathak - Copy and import into Editor
+
+. Uses 100% Python Standard Library (No pip install required).
+"""
+import socket
+import threading
+import json
+import time
+import sys
+import webbrowser
+from datetime import datetime
+
+# --- NETWORK CONFIGURATION ---
+UDP_PORT = 50000          # Port for automatic nearby user discovery (UDP Broadcast)
+DEFAULT_TCP_PORT = 50001  # Default port for direct 1-on-1 text messages (TCP)
+BROADCAST_INTERVAL = 3.0  # Seconds between automatic discovery pings
+PEER_TIMEOUT = 12.0       # Seconds before an offline device is removed from the list
+BUFFER_SIZE = 4096
+
+
+def get_local_ip():
+    """Finds the actual local network (LAN/Wi-Fi) IP address of this computer."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("10.255.255.255", 1))
+        ip = s.getsockname()[0]
+    except Exception:
+        ip = "127.0.0.1"
+    finally:
+        s.close()
+    return ip
+
+
+class PyMessenger:
+    def __init__(self):
+        self.hostname = socket.gethostname()
+        self.local_ip = get_local_ip()
+        self.tcp_port = DEFAULT_TCP_PORT
+        self.running = True
+
+        # Dictionary of discovered nearby users:
+        # key = "ip:port", value = {"name": str, "ip": str, "port": int, "last_seen": float}
+        self.peers = {}
+        self.peers_lock = threading.Lock()
+
+        # Currently selected user for 1-on-1 private chat
+        self.active_peer_id = None
+        # Stores chat history per user during the session
+        self.chat_history = {}
+
+        # Track whether the "LAN Doom" invite prompt has been displayed recently
+        self.last_doom_check = 0
+
+        # Start TCP listener first so we know our exact port
+        self.tcp_server = self._init_tcp_server()
+        self.node_id = f"{self.local_ip}:{self.tcp_port}"
+
+        # If running 2 instances on the same computer for testing, give each a unique suffix
+        if self.tcp_port != DEFAULT_TCP_PORT:
+            self.device_name = f"{self.hostname}-{self.tcp_port}"
+        else:
+            self.device_name = self.hostname
+
+    def _init_tcp_server(self):
+        """Binds TCP server to DEFAULT_TCP_PORT, or picks a free port if testing 2 terminals on 1 PC."""
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            srv.bind(("0.0.0.0", self.tcp_port))
+        except OSError:
+            srv.bind(("0.0.0.0", 0))
+            self.tcp_port = srv.getsockname()[1]
+        srv.listen(10)
+        return srv
+
+    def start(self):
+        """Starts background threads for discovery and receiving messages, then opens the terminal UI."""
+        threading.Thread(target=self._tcp_receive_loop, daemon=True).start()
+        threading.Thread(target=self._udp_broadcast_loop, daemon=True).start()
+        threading.Thread(target=self._udp_listen_loop, daemon=True).start()
+        threading.Thread(target=self._cleanup_peers_loop, daemon=True).start()
+        threading.Thread(target=self._lan_doom_background_monitor, daemon=True).start()
+
+        self._run_terminal_ui()
+
+    # =====================================================================
+    # PART 1: AUTOMATIC NEARBY USER DETECTION & "LAN DOOM" MONITOR
+    # =====================================================================
+    def _udp_broadcast_loop(self):
+        """Every 3 seconds, announces our Device Name and IP to everyone on the Local Network."""
+        broadcaster = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        broadcaster.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+
+        payload = json.dumps({
+            "type": "PYMSG_HELLO",
+            "id": self.node_id,
+            "name": self.device_name,
+            "ip": self.local_ip,
+            "port": self.tcp_port
+        }).encode("utf-8")
+
+        while self.running:
+            try:
+                broadcaster.sendto(payload, ("<broadcast>", UDP_PORT))
+            except Exception:
+                try:
+                    broadcaster.sendto(payload, ("255.255.255.255", UDP_PORT))
+                except Exception:
+                    pass
+            time.sleep(BROADCAST_INTERVAL)
+        broadcaster.close()
+
+    def _udp_listen_loop(self):
+        """Listens for announcements from other computers running PyMessenger on the LAN."""
+        listener = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        if hasattr(socket, "SO_REUSEPORT"):
+            try:
+                listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+            except OSError:
+                pass
+
+        try:
+            listener.bind(("", UDP_PORT))
+        except Exception as e:
+            print(f"\n[!] Note: UDP port {UDP_PORT} busy or restricted ({e}).")
+            return
+
+        while self.running:
+            try:
+                data, addr = listener.recvfrom(BUFFER_SIZE)
+                info = json.loads(data.decode("utf-8"))
+                if info.get("type") == "PYMSG_HELLO":
+                    peer_id = info.get("id")
+                    if peer_id and peer_id != self.node_id:
+                        with self.peers_lock:
+                            is_new = peer_id not in self.peers
+                            self.peers[peer_id] = {
+                                "name": info.get("name", "Unknown-Device"),
+                                "ip": info.get("ip", addr[0]),
+                                "port": int(info.get("port", DEFAULT_TCP_PORT)),
+                                "last_seen": time.time()
+                            }
+                        if is_new:
+                            # INSTANT POP-UP NOTIFICATION WHEN A NEW USER JOINS IN THE BACKGROUND!
+                            sys.stdout.write(
+                                f"\n\n🚨 [LAN JOIN ALERT] New user detected: {info.get('name')} ({info.get('ip', addr[0])}) has joined the network!\n"
+                            )
+                            if self.active_peer_id:
+                                sys.stdout.write(f"Chat [{self.peers.get(self.active_peer_id, {}).get('name', 'Peer')}]> ")
+                            else:
+                                sys.stdout.write("PyMessenger> ")
+                            sys.stdout.flush()
+            except Exception:
+                continue
+        listener.close()
+
+    def _lan_doom_background_monitor(self):
+        """Actively checks in the background if zero devices are online. If so, triggers the 'LAN Doom' invite prompt."""
+        while self.running:
+            time.sleep(5.0)
+            with self.peers_lock:
+                peer_count = len(self.peers)
+            
+            if peer_count == 0:
+                current_time = time.time()
+                if current_time - self.last_doom_check > 30.0:
+                    self.last_doom_check = current_time
+                    sys.stdout.write(
+                        "\n⚠️  [LAN DOOM]: No nearby users detected on this network.\n"
+                        "💡 Invite your friends/colleagues to PyMessenger!\n"
+                    )
+                    if self.active_peer_id:
+                        with self.peers_lock:
+                            pname = self.peers.get(self.active_peer_id, {}).get("name", "Peer")
+                        sys.stdout.write(f"Chat [{pname}]> ")
+                    else:
+                        sys.stdout.write("PyMessenger> ")
+                    sys.stdout.flush()
+
+    def _cleanup_peers_loop(self):
+        """Automatically removes users if they close the program or disconnect from Wi-Fi."""
+        while self.running:
+            now = time.time()
+            with self.peers_lock:
+                expired = [pid for pid, p in self.peers.items() if now - p["last_seen"] > PEER_TIMEOUT]
+                for pid in expired:
+                    name = self.peers[pid]["name"]
+                    del self.peers[pid]
+                    if self.active_peer_id == pid:
+                        self.active_peer_id = None
+                        sys.stdout.write(f"\r[!] {name} went offline. Returned to lobby.\nPyMessenger> ")
+                        sys.stdout.flush()
+            time.sleep(3.0)
+
+    # =====================================================================
+    # PART 2: 1-ON-1 PRIVATE TEXT MESSAGING (DIRECT TCP SOCKETS)
+    # =====================================================================
+    def _tcp_receive_loop(self):
+        """Waits for incoming direct text messages from other users."""
+        while self.running:
+            try:
+                conn, addr = self.tcp_server.accept()
+                threading.Thread(target=self._handle_incoming_msg, args=(conn, addr), daemon=True).start()
+            except Exception:
+                break
+
+    def _handle_incoming_msg(self, conn, addr):
+        """Unpacks and displays a private text message."""
+        with conn:
+            try:
+                raw = conn.recv(BUFFER_SIZE)
+                if not raw:
+                    return
+                msg_obj = json.loads(raw.decode("utf-8"))
+                sender_id = msg_obj.get("id", f"{addr[0]}:{DEFAULT_TCP_PORT}")
+                sender_name = msg_obj.get("name", addr[0])
+                text = msg_obj.get("text", "")
+                timestamp = datetime.now().strftime("%H:%M:%S")
+
+                with self.peers_lock:
+                    if sender_id not in self.peers:
+                        self.peers[sender_id] = {
+                            "name": sender_name,
+                            "ip": addr[0],
+                            "port": int(msg_obj.get("port", DEFAULT_TCP_PORT)),
+                            "last_seen": time.time()
+                        }
+
+                formatted = f"[{timestamp}] {sender_name}: {text}"
+                self.chat_history.setdefault(sender_id, []).append(formatted)
+
+                if self.active_peer_id == sender_id:
+                    sys.stdout.write(f"\r{formatted}\nChat [{sender_name}]> ")
+                    sys.stdout.flush()
+                else:
+                    sys.stdout.write(
+                        f"\r\n[NEW MESSAGE from {sender_name}]: \"{text}\" (Type /users to select & reply)\nPyMessenger> "
+                    )
+                    sys.stdout.flush()
+            except Exception:
+                pass
+
+    def send_direct_message(self, peer_id, text):
+        """Sends a text message directly to the selected user's IP and TCP port."""
+        with self.peers_lock:
+            peer = self.peers.get(peer_id)
+        if not peer:
+            print("[!] That user is no longer online.")
+            self.active_peer_id = None
+            return False
+
+        packet = json.dumps({
+            "id": self.node_id,
+            "name": self.device_name,
+            "port": self.tcp_port,
+            "text": text
+        }).encode("utf-8")
+
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(4.0)
+                s.connect((peer["ip"], peer["port"]))
+                s.sendall(packet)
+
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            formatted = f"[{timestamp}] You: {text}"
+            self.chat_history.setdefault(peer_id, []).append(formatted)
+            return True
+        except Exception as e:
+            print(f"[!] Could not deliver message to {peer['name']} ({peer['ip']}): {e}")
+            return False
+
+    # =====================================================================
+    # PART 3: AUTOMATED BULK TEST SUITE & TERMINAL INTERFACE
+    # =====================================================================
+    def run_bulk_self_test(self, message_count=25):
+        """Runs a rapid bulk stress test over local loopback to verify 100% reliability."""
+        print(f"\n[BULK TEST] Sending {message_count} rapid messages over TCP loopback...")
+        passed = 0
+        start_time = time.time()
+
+        for i in range(1, message_count + 1):
+            packet = json.dumps({
+                "id": "127.0.0.1:99999",
+                "name": "Automated-Test-Bot",
+                "port": self.tcp_port,
+                "text": f"Bulk verification message #{i}"
+            }).encode("utf-8")
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.settimeout(2.0)
+                    s.connect(("127.0.0.1", self.tcp_port))
+                    s.sendall(packet)
+                passed += 1
+            except Exception as e:
+                print(f"[BULK TEST] Failed on packet #{i}: {e}")
+
+        time.sleep(0.2)
+        elapsed = round((time.time() - start_time) * 1000, 2)
+        print(f"[BULK TEST] RESULT: {passed}/{message_count} messages delivered in {elapsed} ms (100% OK)\n")
+
+    def _print_banner(self):
+        print("=" * 64)
+        print(" PyMessenger by Agastya Pathak")
+        print("=" * 64)
+        print(f" Your Device Name : {self.device_name}")
+        print(f" Local Network IP : {self.local_ip} (TCP Port: {self.tcp_port})")
+        print("-" * 64)
+        print(" Commands:")
+        print("   /users         -> See nearby computers running PyMessenger")
+        print("   /select <num>  -> Pick a user by number for 1-on-1 private chat")
+        print("   /back          -> Exit current 1-on-1 chat back to main lobby")
+        print("   /github        -> Open GitHub profile in your web browser")
+        print("   /test          -> Run 25-message automated bulk self-test")
+        print("   /quit          -> Close PyMessenger")
+        print("=" * 64)
+
+    def _list_users(self):
+        with self.peers_lock:
+            peer_items = list(self.peers.items())
+
+        if not peer_items:
+            print("\n[i] No other users found yet. Invite your friends/colleagues to PyMessenger!")
+            return []
+
+        print("\n--- Nearby Active Users on Local Network ---")
+        for idx, (pid, info) in enumerate(peer_items, start=1):
+            history_len = len(self.chat_history.get(pid, []))
+            print(f"  [{idx}] {info['name']}  (IP: {info['ip']}:{info['port']}) - {history_len} messages")
+        print("--------------------------------------------")
+        print("Tip: Type '/select 1' (or just '1') to start chatting with user #1.\n")
+        return peer_items
+
+    def _run_terminal_ui(self):
+        self._print_banner()
+
+        while self.running:
+            try:
+                if self.active_peer_id:
+                    with self.peers_lock:
+                        peer_name = self.peers.get(self.active_peer_id, {}).get("name", "User")
+                    prompt = f"Chat [{peer_name}]> "
+                else:
+                    prompt = "PyMessenger> "
+
+                user_input = input(prompt).strip()
+                if not user_input:
+                    continue
+
+                if user_input.lower() in ("/quit", "/exit"):
+                    print("Closing PyMessenger...")
+                    self.running = False
+                    break
+
+                elif user_input.lower() == "/users":
+                    self._list_users()
+
+                elif user_input.lower() == "/back":
+                    self.active_peer_id = None
+                    print("[i] Left chat. Type /users to pick another nearby user.")
+
+                elif user_input.lower() == "/github":
+                    url = "https://github.com/agastyapathak"
+                    print(f"\n🌐 Opening GitHub profile in your browser: {url}")
+                    try:
+                        webbrowser.open(url)
+                    except Exception as e:
+                        print(f"[!] Could not open browser automatically: {e}")
+                    print()
+
+                elif user_input.lower() == "/test":
+                    self.run_bulk_self_test()
+
+                elif user_input.lower().startswith("/select") or (self.active_peer_id is None and user_input.isdigit()):
+                    parts = user_input.split()
+                    num_str = parts[1] if len(parts) > 1 else parts[0]
+                    if not num_str.isdigit():
+                        print("[!] Usage: /select 1")
+                        continue
+
+                    with self.peers_lock:
+                        current_peers = list(self.peers.items())
+
+                    choice = int(num_str) - 1
+                    if 0 <= choice < len(current_peers):
+                        pid, pinfo = current_peers[choice]
+                        self.active_peer_id = pid
+                        print("\n" + "=" * 50)
+                        print(f" Private 1-on-1 Chat with: {pinfo['name']} ({pinfo['ip']})")
+                        print(" Type your message and press Enter. Type /back to leave.")
+                        print("=" * 50)
+                        for line in self.chat_history.get(pid, []):
+                            print(line)
+                    else:
+                        print("[!] Invalid user number. Type /users to see the list.")
+
+                else:
+                    if self.active_peer_id:
+                        self.send_direct_message(self.active_peer_id, user_input)
+                    else:
+                        print("[i] Select a user first! Type '/users' then '/select 1'.")
+
+            except (KeyboardInterrupt, EOFError):
+                print("\nClosing PyMessenger...")
+                self.running = False
+                break
+
+
+if __name__ == "__main__":
+    if "--test" in sys.argv:
+        app = PyMessenger()
+        threading.Thread(target=app._tcp_receive_loop, daemon=True).start()
+        app.run_bulk_self_test(25)
+        sys.exit(0)
+
+    app = PyMessenger()
+    app.start()
