@@ -2,6 +2,7 @@
 
 Serverless, local network (LAN) text messaging tool built into Python,PyMessenger detects users/devices with PyMessenger with same WiFi
 
+Check Wiki for more Info!
 
 ---
 
