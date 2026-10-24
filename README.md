@@ -10,7 +10,9 @@ Check other devices in your WiFi with PyMessenger installed.
 
 Status Indicator: 
 🟢 Green Dot: Active on PyMessenger
+
 🔵 Blue Dot: Online (responsive Device with Python)
+
 🔴 Red Dot: Incompatible device
 
 ## 🚀 Quick Start
