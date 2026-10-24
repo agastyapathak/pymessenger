@@ -4,7 +4,14 @@ Serverless, local network (LAN) text messaging tool built into Python,PyMessenge
 
 ---
 
+## PyMessenger Workspace
 
+Check other devices in your WiFi with PyMessenger installed. 
+
+Status Indicator: 
+🟢 Green Dot: Active on PyMessenger
+🔵 Blue Dot: Online (responsive Device with Python)
+🔴 Red Dot: Incompatible device
 
 ## 🚀 Quick Start
 
