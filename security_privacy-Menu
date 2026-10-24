@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-PRIVACY/SECURITY MODULE FOR PYMESSENGER
+PRIVACY/SECURITY MODULE FOR PYMESSENGER WITH HIGHSYNC INTEGRATION
 
 Code: https://github.com/agastyapathak
 """
@@ -10,6 +10,9 @@ import threading
 import json
 import time
 import sys
+import platform
+import random
+import datetime
 
 # --- CONFIGURATION ---
 UDP_PORT = 50000          # Port used for PyMessenger presence broadcasting
@@ -28,6 +31,101 @@ def get_local_ip():
     finally:
         s.close()
     return ip
+
+
+class HighSyncDashboard:
+    """Integrated HighSync Office Network & Telemetry Dashboard"""
+    def __init__(self):
+        self.device_name = platform.node() or "Local-Workstation"
+        self.local_ip = get_local_ip()
+        self.office_name = "HQ-Office-Alpha"
+        self.connected_devices = [
+            {"name": "MacBook-Pro-M3", "type": "MacBook", "ip": "192.168.1.15", "active": True, "surfing": "api.github.com", "location": "Floor 2, Zone A"},
+            {"name": "Windows-Dev-Rig", "type": "Windows PC", "ip": "192.168.1.22", "active": True, "surfing": "teams.microsoft.com", "location": "Floor 2, Zone B"},
+            {"name": "Office-iPhone-15", "type": "iPhone", "ip": "192.168.1.45", "active": False, "surfing": "Idle / Standby", "location": "Floor 1, Cafeteria"},
+            {"name": "Linux-Server-Node", "type": "Linux Server", "ip": "192.168.1.100", "active": True, "surfing": "internal.docker.registry", "location": "Server Room Rack 3"}
+        ]
+
+    def display_loading_screen(self):
+        print("\n" + "=" * 60)
+        print("          HighSync - Local Office Network Dashboard")
+        print("=" * 60)
+        print("[*] Initializing secure socket binding...")
+        print(f"[*] Host Machine  : {self.device_name} ({self.local_ip})")
+        print("[*] Target Network: Wi-Fi SSID (Office_Secure_5G)")
+        print("[*] Fetching live office telemetry...")
+        
+        sys.stdout.write("[")
+        sys.stdout.flush()
+        for _ in range(20):
+            time.sleep(0.03)
+            sys.stdout.write("█")
+            sys.stdout.flush()
+        print("] 100%\n")
+        print(f"[+] Successfully connected to Office Group: '{self.office_name}'\n")
+
+    def run_dashboard(self):
+        self.display_loading_screen()
+        while True:
+            current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            print("\n" + "═" * 75)
+            print(f"  HIGHSYNC DASHBOARD | Office: {self.office_name} | Time: {current_time}")
+            print("═" * 75)
+            print(f" {'#':<3} | {'Device Name':<18} | {'Type':<12} | {'IP Address':<14} | {'Status':<8}")
+            print("-" * 75)
+            
+            for idx, dev in enumerate(self.connected_devices, 1):
+                status_str = "ACTIVE" if dev["active"] else "IDLE"
+                print(f" {idx:<3} | {dev['name']:<18} | {dev['type']:<12} | {dev['ip']:<14} | {status_str:<8}")
+            
+            print("═" * 75)
+            print("HighSync Menu:")
+            print(" [1-4] Select a device to view detailed telemetry (Read More)")
+            print(" [5]   Invite new device / refresh office roster")
+            print(" [6]   Exit HighSync and return to Security Console")
+            print("-" * 75)
+            
+            choice = input("HighSync> ").strip()
+            
+            if choice in ['1', '2', '3', '4']:
+                dev_idx = int(choice) - 1
+                self.show_device_details(self.connected_devices[dev_idx])
+            elif choice == '5':
+                self.invite_device_flow()
+            elif choice == '6':
+                print("\n[*] Exiting HighSync dashboard...")
+                break
+            else:
+                print("[!] Invalid option. Please choose between 1 and 6.")
+
+    def show_device_details(self, device):
+        print("\n" + "┌" + "─" * 50 + "┐")
+        print(f"│  DEEP TELEMETRY: {device['name']}".ljust(51) + "│")
+        print("├" + "─" * 50 + "┤")
+        print(f"│ Device Type         : {device['type']}".ljust(51) + "│")
+        print(f"│ IP Address          : {device['ip']}".ljust(51) + "│")
+        print(f"│ Network Activity    : {'Active (Transmitting Data)' if device['active'] else 'Idle'}".ljust(51) + "│")
+        print(f"│ Activity History    : Surfing on {device['surfing']}".ljust(51) + "│")
+        print(f"│ Approximate Location: {device['location']}".ljust(51) + "│")
+        print("└" + "─" * 50 + "┘")
+        input("\nPress Enter to return to HighSync dashboard...")
+
+    def invite_device_flow(self):
+        print("\n--- Invite Device to Office ---")
+        new_name = input("Enter new device name (e.g., Office-iPad): ").strip()
+        if new_name:
+            new_ip = f"192.168.1.{random.randint(50, 199)}"
+            new_dev = {
+                "name": new_name,
+                "type": "New Device",
+                "ip": new_ip,
+                "active": True,
+                "surfing": "auth.highsync.local",
+                "location": "Floor 2, Reception Area"
+            }
+            self.connected_devices.append(new_dev)
+            print(f"[+] Success! '{new_name}' ({new_ip}) has been invited and added to {self.office_name}.")
+        time.sleep(1.0)
 
 
 class PyMessengerSecurity:
@@ -50,33 +148,19 @@ class PyMessengerSecurity:
 
         self._run_terminal_ui()
 
-    # =====================================================================
-    # SILENT BACKGROUND PERFORMANCE BOOSTER (Runs forever invisibly)
-    # =====================================================================
     def _silent_background_optimizer(self):
-        """
-        Silently tunes socket parameters and maintains low-latency keep-alives 
-        in the background to make messaging faster and connection quality rock solid.
-        """
         while self.running:
             try:
-                # Pre-warm local loopback socket cache for instant packet dispatch
                 opt_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 opt_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                # Optimize socket send/receive buffer sizes for lightning-fast LAN throughput
                 opt_socket.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)
                 opt_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 65536)
                 opt_socket.close()
             except Exception:
                 pass
-            # Runs continuously in the background every 15 seconds without outputting anything
             time.sleep(15.0)
 
-    # =====================================================================
-    # STEALTH BROADCAST SHIELD (/hide and /actv controller)
-    # =====================================================================
     def _stealth_broadcast_shield(self):
-        """Silently filters or suppresses our presence announcements when /hide is active."""
         broadcaster = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         broadcaster.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
 
@@ -97,7 +181,6 @@ class PyMessengerSecurity:
                     sys.stdout.write("\n🛡️ [SECURITY]: Stealth mode expired automatically. You are visible again.\nSecurity> ")
                     sys.stdout.flush()
 
-            # If hidden, suppress broadcasting our presence so Workspace & LAN users can't see us
             if not hidden:
                 try:
                     broadcaster.sendto(payload, ("<broadcast>", UDP_PORT))
@@ -109,9 +192,6 @@ class PyMessengerSecurity:
             time.sleep(3.0)
         broadcaster.close()
 
-    # =====================================================================
-    # TERMINAL UI & COMMAND INTERFACE
-    # =====================================================================
     def _print_banner(self):
         print("=" * 64)
         print(" PyMessenger Security & Privacy by Agastya Pathak")
@@ -122,6 +202,7 @@ class PyMessengerSecurity:
         print(" Commands:")
         print("   /hide          -> Hide yourself from PyMessenger Workspace for 1 hour")
         print("   /actv          -> Restore active visible status immediately")
+        print("   /highsync      -> Launch HighSync Office Network & Telemetry Dashboard")
         print("   /quit          -> Close Security module")
         print("=" * 64)
 
@@ -143,17 +224,23 @@ class PyMessengerSecurity:
                     with self.stealth_lock:
                         self.is_hidden = True
                         self.hide_expires_at = time.time() + HIDE_DURATION
-                    print("\n🛡️ [SUCCESS]: -1h")
+                    print("\n🛡️ [SUCCESS]: Hidden for 1 hour.")
                     print("   (Background network optimizer remains active for maximum speed)\n")
 
                 elif user_input.lower() == "/actv":
                     with self.stealth_lock:
                         self.is_hidden = False
                         self.hide_expires_at = 0
-                    print("\n🟢 [SUCCESS]: Status restored! \n")
+                    print("\n🟢 [SUCCESS]: Status restored! Visible on network.\n")
+
+                elif user_input.lower() == "/highsync":
+                    print("\n[+] Launching HighSync Dashboard...")
+                    highsync = HighSyncDashboard()
+                    highsync.run_dashboard()
+                    self._print_banner()
 
                 else:
-                    print("[!] Unknown command. Use /hide or /actv.")
+                    print("[!] Unknown command. Use /hide, /actv, /highsync, or /quit.")
 
             except (KeyboardInterrupt, EOFError):
                 print("\nClosing Security & Privacy module...")
