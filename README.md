@@ -1,6 +1,7 @@
-# PyMessenger 💬
+# PyMessenger Markdown 💬
 
 Serverless, local network (LAN) text messaging tool built into Python,PyMessenger detects users/devices with PyMessenger with same WiFi
+
 
 ---
 
@@ -21,5 +22,9 @@ Status Indicator:
 1. Install Python 3 on Device - open VS Code (Recommended), other Python Editor 
 2. Download or clone `pymessenger.py` and open/run PyMessenger.
 3. Open  terminal from project folder and run programm:
+
+## Privacy & Security Menu
+
+Hide yourself from PyMessenger Workspace, block certain users from contacting you. Enhance connection for PyMessenger.
 
 ## Agastya Pathak - PyMessenger
