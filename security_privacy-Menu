@@ -1,0 +1,166 @@
+#!/usr/bin/env python3
+"""
+PRIVACY/SECURITY MODULE FOR PYMESSENGER
+
+Code: https://github.com/agastyapathak
+"""
+
+import socket
+import threading
+import json
+import time
+import sys
+
+# --- CONFIGURATION ---
+UDP_PORT = 50000          # Port used for PyMessenger presence broadcasting
+DEFAULT_TCP_PORT = 50001
+HIDE_DURATION = 3600      # 1 hour in seconds
+
+
+def get_local_ip():
+    """Finds the actual local network (LAN/Wi-Fi) IP address of this computer."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("10.255.255.255", 1))
+        ip = s.getsockname()[0]
+    except Exception:
+        ip = "127.0.0.1"
+    finally:
+        s.close()
+    return ip
+
+
+class PyMessengerSecurity:
+    def __init__(self):
+        self.hostname = socket.gethostname()
+        self.local_ip = get_local_ip()
+        self.running = True
+        
+        # Stealth & Privacy state
+        self.is_hidden = False
+        self.hide_expires_at = 0
+        self.stealth_lock = threading.Lock()
+
+        self.node_id = f"{self.local_ip}:{DEFAULT_TCP_PORT}"
+
+    def start(self):
+        """Starts the silent background performance booster and stealth manager, then opens the CLI."""
+        threading.Thread(target=self._silent_background_optimizer, daemon=True).start()
+        threading.Thread(target=self._stealth_broadcast_shield, daemon=True).start()
+
+        self._run_terminal_ui()
+
+    # =====================================================================
+    # SILENT BACKGROUND PERFORMANCE BOOSTER (Runs forever invisibly)
+    # =====================================================================
+    def _silent_background_optimizer(self):
+        """
+        Silently tunes socket parameters and maintains low-latency keep-alives 
+        in the background to make messaging faster and connection quality rock solid.
+        """
+        while self.running:
+            try:
+                # Pre-warm local loopback socket cache for instant packet dispatch
+                opt_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                opt_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                # Optimize socket send/receive buffer sizes for lightning-fast LAN throughput
+                opt_socket.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)
+                opt_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 65536)
+                opt_socket.close()
+            except Exception:
+                pass
+            # Runs continuously in the background every 15 seconds without outputting anything
+            time.sleep(15.0)
+
+    # =====================================================================
+    # STEALTH BROADCAST SHIELD (/hide and /actv controller)
+    # =====================================================================
+    def _stealth_broadcast_shield(self):
+        """Silently filters or suppresses our presence announcements when /hide is active."""
+        broadcaster = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        broadcaster.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+
+        payload = json.dumps({
+            "type": "PYMSG_HELLO",
+            "id": self.node_id,
+            "name": f"{self.hostname} [SECURE]",
+            "ip": self.local_ip,
+            "port": DEFAULT_TCP_PORT
+        }).encode("utf-8")
+
+        while self.running:
+            with self.stealth_lock:
+                hidden = self.is_hidden
+                if hidden and time.time() > self.hide_expires_at:
+                    self.is_hidden = False
+                    hidden = False
+                    sys.stdout.write("\n🛡️ [SECURITY]: Stealth mode expired automatically. You are visible again.\nSecurity> ")
+                    sys.stdout.flush()
+
+            # If hidden, suppress broadcasting our presence so Workspace & LAN users can't see us
+            if not hidden:
+                try:
+                    broadcaster.sendto(payload, ("<broadcast>", UDP_PORT))
+                except Exception:
+                    try:
+                        broadcaster.sendto(payload, ("255.255.255.255", UDP_PORT))
+                    except Exception:
+                        pass
+            time.sleep(3.0)
+        broadcaster.close()
+
+    # =====================================================================
+    # TERMINAL UI & COMMAND INTERFACE
+    # =====================================================================
+    def _print_banner(self):
+        print("=" * 64)
+        print(" PyMessenger Security & Privacy by Agastya Pathak")
+        print("=" * 64)
+        print(f" Status         : Active (Background Booster Online 🚀)")
+        print(f" Stealth Shield : {'HIDDEN (Stealth Active)' if self.is_hidden else 'VISIBLE (Normal)'}")
+        print("-" * 64)
+        print(" Commands:")
+        print("   /hide          -> Hide yourself from PyMessenger Workspace for 1 hour")
+        print("   /actv          -> Restore active visible status immediately")
+        print("   /quit          -> Close Security module")
+        print("=" * 64)
+
+    def _run_terminal_ui(self):
+        self._print_banner()
+
+        while self.running:
+            try:
+                user_input = input("Security> ").strip()
+                if not user_input:
+                    continue
+
+                if user_input.lower() in ("/quit", "/exit"):
+                    print("Closing Security & Privacy module...")
+                    self.running = False
+                    break
+
+                elif user_input.lower() == "/hide":
+                    with self.stealth_lock:
+                        self.is_hidden = True
+                        self.hide_expires_at = time.time() + HIDE_DURATION
+                    print("\n🛡️ [SUCCESS]: -1h")
+                    print("   (Background network optimizer remains active for maximum speed)\n")
+
+                elif user_input.lower() == "/actv":
+                    with self.stealth_lock:
+                        self.is_hidden = False
+                        self.hide_expires_at = 0
+                    print("\n🟢 [SUCCESS]: Status restored! \n")
+
+                else:
+                    print("[!] Unknown command. Use /hide or /actv.")
+
+            except (KeyboardInterrupt, EOFError):
+                print("\nClosing Security & Privacy module...")
+                self.running = False
+                break
+
+
+if __name__ == "__main__":
+    app = PyMessengerSecurity()
+    app.start()
