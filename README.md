@@ -18,11 +18,10 @@ Status Indicator:
 
 🔴 Red Dot: Incompatible device
 
-## Our Homepage: 
+## visual  Homepage: 
 
 Link: https://showcase-atlaspymessenger281912.lovable.app
-
-Built with Lovable ❤️
+made  with Lovable 
 
 ## 🚀 Quick Start
 
